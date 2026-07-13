@@ -8,8 +8,8 @@ use Illuminate\Support\Facades\Schema;
 
 class ImportSchema extends Command
 {
-    protected $signature = 'db:import-schema {--force : Fuerza la importación aunque ya existan tablas}';
-    protected $description = 'Importa el dump SQL inicial (database/sql/schema.sql) si la BD está vacía';
+    protected $signature = 'db:import-schema {--force : Borra TODAS las tablas y reimporta desde cero}';
+    protected $description = 'Importa el dump SQL. Con --force borra todo antes.';
 
     public function handle(): int
     {
@@ -21,8 +21,27 @@ class ImportSchema extends Command
         }
 
         if (!$this->option('force') && Schema::hasTable('roles')) {
-            $this->info('La BD ya contiene el esquema (tabla "roles" existe). Saltando importación.');
+            $this->info('BD ya contiene el esquema (tabla "roles" existe). Saltando.');
             return self::SUCCESS;
+        }
+
+        if ($this->option('force')) {
+            $this->warn('MODO --force: eliminando todas las tablas existentes...');
+            try {
+                DB::statement('SET FOREIGN_KEY_CHECKS = 0;');
+                $tables = DB::select('SHOW TABLES');
+                $dbName = DB::getDatabaseName();
+                $key = 'Tables_in_' . $dbName;
+                foreach ($tables as $row) {
+                    $t = $row->$key ?? array_values((array)$row)[0];
+                    DB::statement("DROP TABLE IF EXISTS `{$t}`");
+                    $this->line("  drop {$t}");
+                }
+                DB::statement('SET FOREIGN_KEY_CHECKS = 1;');
+            } catch (\Throwable $e) {
+                $this->error('Error dropeando tablas: ' . $e->getMessage());
+                return self::FAILURE;
+            }
         }
 
         $this->info("Importando {$file} ...");
@@ -34,7 +53,7 @@ class ImportSchema extends Command
 
         try {
             DB::unprepared($sql);
-            $this->info('Esquema importado correctamente.');
+            $this->info('Esquema y datos importados correctamente.');
             return self::SUCCESS;
         } catch (\Throwable $e) {
             $this->error('Error importando el SQL: ' . $e->getMessage());
